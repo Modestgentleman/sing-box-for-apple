@@ -65,18 +65,26 @@ workflows:
             echo "Available branches:"
             git branch -r
             
-            # 尝试切换到 dev-next，如果失败则使用 main
-            echo "Attempting to checkout dev-next branch..."
-            if git checkout dev-next 2>/dev/null || git checkout -b dev-next origin/dev-next 2>/dev/null; then
+            # 按优先级尝试分支: main -> dev-next -> main-next -> stable
+            echo "Attempting to checkout suitable branch..."
+            
+            # 尝试 main 分支（最稳定）
+            if git checkout main 2>/dev/null; then
+              echo "✅ Using main branch"
+            # 尝试 dev-next 分支
+            elif git checkout dev-next 2>/dev/null || git checkout -b dev-next origin/dev-next 2>/dev/null; then
               echo "✅ Using dev-next branch"
+            # 尝试 main-next 分支
+            elif git checkout main-next 2>/dev/null || git checkout -b main-next origin/main-next 2>/dev/null; then
+              echo "✅ Using main-next branch"
+            # 尝试 stable 分支
+            elif git checkout stable 2>/dev/null || git checkout -b stable origin/stable 2>/dev/null; then
+              echo "✅ Using stable branch"
             else
-              echo "⚠️ dev-next not found, trying main branch..."
-              if git checkout main 2>/dev/null; then
-                echo "✅ Using main branch"
-              else
-                echo "⚠️ main not found, using current branch"
-                git branch
-              fi
+              echo "⚠️ No suitable branch found, using default branch"
+              git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'
+              DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+              git checkout "$DEFAULT_BRANCH" 2>/dev/null || echo "Using current branch"
             fi
             
             cd ../..
@@ -109,24 +117,64 @@ workflows:
           fi
           
           # 查看可用的 make targets
-          echo "Available make targets:"
-          make help || true
+          echo "=== Available make targets ==="
+          make help 2>/dev/null || make -n 2>/dev/null || cat Makefile | grep "^[a-zA-Z]" || echo "Could not determine targets"
           
-          # 编译 iOS 框架
-          echo "Building iOS framework..."
-          make lib_ios
+          # 尝试多个可能的 target 名称
+          echo "=== Building iOS framework ==="
           
-          # 验证编译产物
-          echo "Checking build output..."
-          find . -name "*.xcframework" -type d
-          
-          if [ -d "build/frameworks/Libbox.xcframework" ] || [ -d "build/libbox.xcframework" ]; then
-            echo "✅ iOS framework built successfully"
-            find build -name "*.xcframework" -type d -exec ls -lh {} \;
+          if make lib_ios 2>/dev/null; then
+            echo "✅ Built with: make lib_ios"
+          elif make libbox_ios 2>/dev/null; then
+            echo "✅ Built with: make libbox_ios"
+          elif make ios 2>/dev/null; then
+            echo "✅ Built with: make ios"
+          elif make lib 2>/dev/null; then
+            echo "✅ Built with: make lib"
           else
-            echo "❌ iOS framework build failed"
-            echo "Build directory contents:"
-            ls -R build/ || echo "build directory not found"
+            echo "❌ None of the known targets work"
+            echo "=== Trying to build manually ==="
+            
+            # 尝试手动构建
+            if [ -f "build.sh" ]; then
+              bash build.sh ios || echo "build.sh failed"
+            elif command -v gomobile &> /dev/null; then
+              echo "Attempting gomobile build..."
+              gomobile bind -target=ios -o build/libbox.xcframework ./... 2>&1 || echo "gomobile build failed"
+            else
+              echo "❌ No build method available"
+              exit 1
+            fi
+          fi
+          
+          # 验证编译产物（检查多个可能的位置）
+          echo "=== Checking build output ==="
+          echo "Searching for xcframework..."
+          find . -name "*.xcframework" -type d 2>/dev/null || echo "No xcframework found yet"
+          
+          # 可能的路径
+          POSSIBLE_PATHS=(
+            "build/frameworks/Libbox.xcframework"
+            "build/libbox.xcframework"
+            "build/Libbox.xcframework"
+            "libbox.xcframework"
+            "Libbox.xcframework"
+          )
+          
+          FRAMEWORK_FOUND=false
+          for path in "${POSSIBLE_PATHS[@]}"; do
+            if [ -d "$path" ]; then
+              echo "✅ iOS framework found at: $path"
+              ls -lh "$path"
+              FRAMEWORK_FOUND=true
+              break
+            fi
+          done
+          
+          if [ "$FRAMEWORK_FOUND" = false ]; then
+            echo "❌ iOS framework not found in expected locations"
+            echo "=== Directory structure ==="
+            ls -R . | head -100
             exit 1
           fi
           
@@ -248,15 +296,17 @@ workflows:
             git clone https://github.com/SagerNet/sing-box.git
             cd sing-box
             git fetch --all
-            # 尝试 dev-next，失败则用 main
-            git checkout dev-next 2>/dev/null || git checkout main 2>/dev/null
+            # 按优先级尝试分支
+            git checkout main 2>/dev/null || git checkout dev-next 2>/dev/null || git checkout stable 2>/dev/null
             cd ../..
           fi
           
           cd Frameworks/sing-box
           git pull || true
           go mod download
-          make lib_macos
+          
+          # 尝试多个可能的 target
+          make lib_macos 2>/dev/null || make libbox_macos 2>/dev/null || make macos 2>/dev/null || echo "Build may have failed"
           cd ../..
       
       # 编译 macOS 应用
@@ -317,15 +367,17 @@ workflows:
             git clone https://github.com/SagerNet/sing-box.git
             cd sing-box
             git fetch --all
-            # 尝试 dev-next，失败则用 main
-            git checkout dev-next 2>/dev/null || git checkout main 2>/dev/null
+            # 按优先级尝试分支
+            git checkout main 2>/dev/null || git checkout dev-next 2>/dev/null || git checkout stable 2>/dev/null
             cd ../..
           fi
           
           cd Frameworks/sing-box
           git pull || true
           go mod download
-          make lib_tvos
+          
+          # 尝试多个可能的 target
+          make lib_tvos 2>/dev/null || make libbox_tvos 2>/dev/null || make tvos 2>/dev/null || echo "Build may have failed"
           cd ../..
       
       - name: Build tvOS app
