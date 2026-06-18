@@ -52,28 +52,81 @@ workflows:
             echo "Cloning sing-box repository..."
             mkdir -p Frameworks
             cd Frameworks
+            
+            # 克隆仓库（不指定分支）
             git clone https://github.com/SagerNet/sing-box.git
             cd sing-box
-            git checkout dev-next
+            
+            # 获取所有远程分支
+            echo "Fetching all branches..."
+            git fetch --all
+            
+            # 查看可用分支
+            echo "Available branches:"
+            git branch -r
+            
+            # 尝试切换到 dev-next，如果失败则使用 main
+            echo "Attempting to checkout dev-next branch..."
+            if git checkout dev-next 2>/dev/null || git checkout -b dev-next origin/dev-next 2>/dev/null; then
+              echo "✅ Using dev-next branch"
+            else
+              echo "⚠️ dev-next not found, trying main branch..."
+              if git checkout main 2>/dev/null; then
+                echo "✅ Using main branch"
+              else
+                echo "⚠️ main not found, using current branch"
+                git branch
+              fi
+            fi
+            
+            cd ../..
+          else
+            echo "sing-box directory already exists, updating..."
+            cd Frameworks/sing-box
+            git fetch --all
+            git pull
             cd ../..
           fi
           
           # 进入 sing-box 目录
           cd Frameworks/sing-box
           
+          # 显示当前分支和版本
+          echo "Current branch:"
+          git branch
+          echo "Current commit:"
+          git log -1 --oneline
+          
           # 下载依赖
+          echo "Downloading Go dependencies..."
           go mod download
+          
+          # 检查 Makefile
+          if [ ! -f "Makefile" ]; then
+            echo "❌ Makefile not found!"
+            ls -la
+            exit 1
+          fi
+          
+          # 查看可用的 make targets
+          echo "Available make targets:"
+          make help || true
           
           # 编译 iOS 框架
           echo "Building iOS framework..."
           make lib_ios
           
           # 验证编译产物
-          if [ -d "build/frameworks/Libbox.xcframework" ]; then
+          echo "Checking build output..."
+          find . -name "*.xcframework" -type d
+          
+          if [ -d "build/frameworks/Libbox.xcframework" ] || [ -d "build/libbox.xcframework" ]; then
             echo "✅ iOS framework built successfully"
-            ls -lh build/frameworks/
+            find build -name "*.xcframework" -type d -exec ls -lh {} \;
           else
             echo "❌ iOS framework build failed"
+            echo "Build directory contents:"
+            ls -R build/ || echo "build directory not found"
             exit 1
           fi
           
@@ -156,7 +209,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your-email@example.com
+          - 895212730@qq.com
         notify:
           success: true
           failure: true
@@ -194,11 +247,14 @@ workflows:
             cd Frameworks
             git clone https://github.com/SagerNet/sing-box.git
             cd sing-box
-            git checkout dev-next
+            git fetch --all
+            # 尝试 dev-next，失败则用 main
+            git checkout dev-next 2>/dev/null || git checkout main 2>/dev/null
             cd ../..
           fi
           
           cd Frameworks/sing-box
+          git pull || true
           go mod download
           make lib_macos
           cd ../..
@@ -260,11 +316,14 @@ workflows:
             cd Frameworks
             git clone https://github.com/SagerNet/sing-box.git
             cd sing-box
-            git checkout dev-next
+            git fetch --all
+            # 尝试 dev-next，失败则用 main
+            git checkout dev-next 2>/dev/null || git checkout main 2>/dev/null
             cd ../..
           fi
           
           cd Frameworks/sing-box
+          git pull || true
           go mod download
           make lib_tvos
           cd ../..
